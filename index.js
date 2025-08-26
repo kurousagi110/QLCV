@@ -23,7 +23,7 @@ async function main(){
     await labelDAO.injectDB(client)
     await taskDAO.injectDB(client)
 
-    app.listen(port,'0.0.0.0' ()=>{
+    app.listen(port,'0.0.0.0', ()=>{
         console.log(`Server is running on port ${port}`)
     })
  
@@ -35,3 +35,4 @@ async function main(){
  
 
 main().catch(console.error)
+
