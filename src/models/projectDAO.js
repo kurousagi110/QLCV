@@ -45,7 +45,7 @@ export default class projectDAO {
     static async updateProject(projectId, name, description) {
         try {
             const result = await projects.updateOne(
-                { _id:projectId },
+                { _id: new ObjectId(projectId) },
                 { $set: { name, description, updatedAt: new Date() } }
             )
             return result.modifiedCount > 0
@@ -57,7 +57,7 @@ export default class projectDAO {
     
     static async deleteProject(projectId) {
         try {
-            const result = await projects.deleteOne({ _id: projectId })
+            const result = await projects.deleteOne({ _id: new ObjectId(projectId) })
             return result.deletedCount > 0
         } catch (e) {
             console.error(`Unable to delete project: ${e}`)
@@ -68,7 +68,7 @@ export default class projectDAO {
     static async getProjectById(projectId) {
         try {
             const id = new ObjectId(projectId);
-            const project = await projects.findOne({ _id: id });
+            const project = await projects.findOne({ _id: new ObjectId(id) });
             console.log("Fetched project:", project);
             return project
         } catch (e) {
@@ -79,7 +79,7 @@ export default class projectDAO {
     
     static async getProjectsByUserId(userId) {
         try {
-            const projectsList = await projects.find({ userId: userId }).toArray()
+            const projectsList = await projects.find({ userId: new ObjectId(userId) }).toArray()
             return projectsList
         } catch (e) {
             console.error(`Unable to get projects by user ID: ${e}`)
@@ -111,3 +111,4 @@ export default class projectDAO {
     }
 
 }
+
