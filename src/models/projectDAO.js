@@ -20,9 +20,7 @@ export default class projectDAO {
                 name: name,
                 description: description,
                 userId: userId,
-                sections: [], // Initialize empty sections array
-                label: [],
-                task: [],
+                sections: [],
                 createdAt: new Date(),
                 updatedAt: new Date()
             }
@@ -111,4 +109,5 @@ export default class projectDAO {
             throw e;
         }
     }
+
 }
