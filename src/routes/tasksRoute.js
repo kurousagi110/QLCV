@@ -9,38 +9,42 @@ router.use(middleware.authenticateToken);
 
 // Validation middleware cho task
 const validateTask = (req, res, next) => {
-    const { name, description, priority, status } = req.body;
+    const { title, description, startAt, dueAt, priority, labels } = req.body;
     
-    if (name && name.length > 100) {
-        return res.status(400).json({ error: "Task name must be less than 100 characters" });
+    if (title && title.length > 100) {
+        return res.status(400).json({ error: "Task title must be less than 100 characters" });
     }
     
-    if (description && description.length > 500) {
-        return res.status(400).json({ error: "Description must be less than 500 characters" });
+    if (description && description.length > 1000) {
+        return res.status(400).json({ error: "Task description must be less than 1000 characters" });
     }
     
-    if (priority && !["low", "medium", "high", "urgent"].includes(priority)) {
-        return res.status(400).json({ error: "Priority must be one of: low, medium, high, urgent" });
+    if (dueAt && isNaN(Date.parse(dueAt))) {
+        return res.status(400).json({ error: "Invalid due date format" });
     }
     
-    if (status && !["todo", "inprogress", "review", "done"].includes(status)) {
-        return res.status(400).json({ error: "Status must be one of: todo, inprogress, review, done" });
+    if (startAt && isNaN(Date.parse(startAt))) {
+        return res.status(400).json({ error: "Invalid start date format" });
+    }
+    
+    const validPriorities = ["low", "medium", "high"];
+    if (priority && !validPriorities.includes(priority)) {
+        return res.status(400).json({ error: "Priority must be one of: low, medium, high" });
     }
     
     next();
 };
 
 // Routes
-router.post("/projects/:projectId/sections/:sectionId/tasks", validateTask, TaskController.createTask);
-router.get("/projects/:projectId/sections/:sectionId/tasks", TaskController.getTasks);
-router.get("/projects/:projectId/sections/:sectionId/tasks/:taskId", TaskController.getTaskById);
-router.put("/projects/:projectId/sections/:sectionId/tasks/:taskId", validateTask, TaskController.updateTask);
-router.delete("/projects/:projectId/sections/:sectionId/tasks/:taskId", TaskController.deleteTask);
-router.get("/users/:userId/tasks", TaskController.getTasksByUserId);
-router.get("/projects/:projectId/tasks", TaskController.getTasksByProjectId);
-router.get("/users/:userId/tasks/search", TaskController.searchTasks);
-router.patch("/projects/:projectId/sections/:sectionId/tasks/:taskId/status", TaskController.updateTaskStatus);
-router.post("/projects/:projectId/sections/:sectionId/tasks/:taskId/labels", TaskController.addLabelToTask);
-router.delete("/projects/:projectId/sections/:sectionId/tasks/:taskId/labels", TaskController.removeLabelFromTask);
+router.get("/projects/:projectId/tasks", TaskController.getTasksByProject); // Fixed this line
+router.post("/", validateTask, TaskController.createTask);
+router.put("/:taskId", validateTask, TaskController.updateTask);
+router.delete("/:taskId", TaskController.deleteTask);
+router.get("/:taskId", TaskController.getTaskById);
+router.get("/users/:userId", TaskController.getTasksByUserId);
+router.get("/search/find", TaskController.searchTasks);
+router.patch("/:taskId/status", TaskController.updateTaskStatus);
+router.post("/:taskId/labels", TaskController.addLabelToTask);
+router.delete("/:taskId/labels", TaskController.removeLabelFromTask);
 
 export default router;

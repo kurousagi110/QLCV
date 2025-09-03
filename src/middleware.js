@@ -1,5 +1,8 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import projectDAO from "./models/projectDAO.js";
+
+// Middleware functions
 
 const middleware = {
     // Xác thực JWT token

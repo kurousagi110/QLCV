@@ -17,7 +17,9 @@ export default class sectionDAO {
     static async addSection(projectId, name, description) {
         try {
             // First check if project exists
-            const project = await projects.findOne({ _id: projectId })
+            const project = await projects.findOne({ _id: new ObjectId(projectId) })
+            console.log("Found project:", project); // Fixed the variable name here
+
             if (!project) {
                 throw new Error("Project not found")
             }
@@ -28,12 +30,16 @@ export default class sectionDAO {
                 description: description,
                 createdAt: new Date()
             }
-            
+
+            // Use $push instead of $set to add to the sections array
             const result = await projects.updateOne(
-                { _id: projectId },
-                { $push: { sections: sectionDoc }, $set: { updatedAt: new Date() } }
+                { _id: new ObjectId(projectId) },
+                { 
+                    $push: { sections: sectionDoc },
+                    $set: { updatedAt: new Date() }
+                }
             )
-            
+
             return result.modifiedCount > 0 ? sectionDoc._id : null
         } catch (e) {
             console.error(`Unable to add section: ${e}`)
@@ -41,12 +47,13 @@ export default class sectionDAO {
         }
     }
     
+    // Other methods remain the same...
     static async updateSection(projectId, sectionId, name, description) {
         try {
             const result = await projects.updateOne(
                 { 
-                    _id: projectId,
-                    "sections._id": sectionId
+                    _id: new ObjectId(projectId),
+                    "sections._id": new ObjectId(sectionId)
                 },
                 { 
                     $set: { 
@@ -66,9 +73,9 @@ export default class sectionDAO {
     static async deleteSection(projectId, sectionId) {
         try {
             const result = await projects.updateOne(
-                { _id: projectId },
+                { _id: new ObjectId(projectId) },
                 { 
-                    $pull: { sections: { _id: sectionId } },
+                    $pull: { sections: { _id: new ObjectId(sectionId) } },
                     $set: { updatedAt: new Date() }
                 }
             )
@@ -83,8 +90,8 @@ export default class sectionDAO {
         try {
             const project = await projects.findOne(
                 { 
-                    _id: projectId,
-                    "sections._id": sectionId
+                    _id: new ObjectId(projectId),
+                    "sections._id": new ObjectId(sectionId)
                 },
                 { projection: { "sections.$": 1 } }
             )
@@ -99,7 +106,7 @@ export default class sectionDAO {
     static async getSectionsByProjectId(projectId) {
         try {
             const project = await projects.findOne(
-                { _id: projectId },
+                { _id: new ObjectId(projectId) },
                 { projection: { sections: 1 } }
             )
             
@@ -112,15 +119,12 @@ export default class sectionDAO {
     
     static async getSections() {
         try {
-            // This might not be efficient for large datasets
-            // Consider a different approach if you have many projects
             const allProjects = await projects.find({}).toArray()
             const allSections = []
             
             allProjects.forEach(project => {
                 if (project.sections && project.sections.length > 0) {
                     project.sections.forEach(section => {
-                        // Add project info to each section
                         allSections.push({
                             ...section,
                             projectName: project.name,

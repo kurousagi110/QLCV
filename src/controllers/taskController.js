@@ -1,19 +1,42 @@
 import taskDAO from "../models/taskDAO.js";
 
 export default class TaskController {
-    static async createTask(req, res) {
-        const { projectId, sectionId } = req.params;
-        const { name, description, assigneeId, dueDate, priority, labels } = req.body;
+    static async getTasksByProject(req, res) {
+        const { projectId } = req.params;
         
-        if (!name) {
-            return res.status(400).json({ error: "Task name is required" });
+        try {
+            const tasks = await taskDAO.getTasksByProject(projectId);
+            res.status(200).json(tasks);
+        } catch (e) {
+            console.error("Get tasks error:", e);
+            res.status(500).json({ error: e.message });
+        }
+    }
+
+    static async createTask(req, res) {
+        const { title, description, startAt, dueAt, priority, labels, projectId, sectionId } = req.body;
+        const userId = req.user.id;
+
+        if (!title) {
+            return res.status(400).json({ error: "Task title is required" });
         }
 
         try {
-            const taskId = await taskDAO.addTask(projectId, sectionId, name, description, assigneeId, dueDate, priority, labels);
+            const taskId = await taskDAO.addTask({
+                title,
+                description,
+                startAt,
+                dueAt,
+                priority,
+                labels,
+                projectId,
+                sectionId,
+                userId
+            });
+            
             res.status(201).json({ 
-                message: "Task created successfully", 
-                taskId 
+                id: taskId,
+                title: title
             });
         } catch (e) {
             console.error("Create task error:", e);
@@ -21,48 +44,42 @@ export default class TaskController {
         }
     }
 
-    static async getTasks(req, res) {
-        const { projectId, sectionId } = req.params;
-        
-        try {
-            const tasks = await taskDAO.getTasks(projectId, sectionId);
-            res.status(200).json({
-                count: tasks.length,
-                tasks
-            });
-        } catch (e) {
-            console.error("Get tasks error:", e);
-            res.status(500).json({ error: e.message });
-        }
-    }
-
     static async updateTask(req, res) {
-        const { projectId, sectionId, taskId } = req.params;
-        const updateData = req.body;
+        const { taskId } = req.params;
+        const { title, description, startAt, dueAt, priority, labels, completed } = req.body;
         
-        if (Object.keys(updateData).length === 0) {
+        if (Object.keys(req.body).length === 0) {
             return res.status(400).json({ error: "At least one field is required for update" });
         }
 
         try {
-            const updated = await taskDAO.updateTask(projectId, sectionId, taskId, updateData);
+            const updated = await taskDAO.updateTask(taskId, {
+                title,
+                description,
+                startAt,
+                dueAt,
+                priority,
+                labels,
+                completed
+            });
             
             if (!updated) {
                 return res.status(404).json({ error: "Task not found or no changes made" });
             }
             
-            res.status(200).json({ message: "Task updated successfully" });
+            res.status(200).json({ message: "Task updated" });
         } catch (e) {
             console.error("Update task error:", e);
             res.status(500).json({ error: e.message });
         }
     }
 
+    // Additional methods that might be needed based on your existing implementation
     static async deleteTask(req, res) {
-        const { projectId, sectionId, taskId } = req.params;
+        const { taskId } = req.params;
         
         try {
-            const deleted = await taskDAO.deleteTask(projectId, sectionId, taskId);
+            const deleted = await taskDAO.deleteTask(taskId);
             
             if (!deleted) {
                 return res.status(404).json({ error: "Task not found" });
@@ -76,10 +93,10 @@ export default class TaskController {
     }
 
     static async getTaskById(req, res) {
-        const { projectId, sectionId, taskId } = req.params;
+        const { taskId } = req.params;
         
         try {
-            const task = await taskDAO.getTaskById(projectId, sectionId, taskId);
+            const task = await taskDAO.getTaskById(taskId);
             
             if (!task) {
                 return res.status(404).json({ error: "Task not found" });
@@ -97,42 +114,19 @@ export default class TaskController {
         
         try {
             const tasks = await taskDAO.getTasksByUserId(userId);
-            res.status(200).json({
-                count: tasks.length,
-                tasks
-            });
+            res.status(200).json(tasks);
         } catch (e) {
             console.error("Get tasks by user ID error:", e);
             res.status(500).json({ error: e.message });
         }
     }
 
-    static async getTasksByProjectId(req, res) {
-        const { projectId } = req.params;
-        
-        try {
-            const tasks = await taskDAO.getTasksByProjectId(projectId);
-            res.status(200).json({
-                count: tasks.length,
-                tasks
-            });
-        } catch (e) {
-            console.error("Get tasks by project ID error:", e);
-            res.status(500).json({ error: e.message });
-        }
-    }
-
     static async searchTasks(req, res) {
-        const { userId } = req.params;
-        const { query, status, priority, assigneeId, page = 1, limit = 10 } = req.query;
+        const { query, page = 1, limit = 10 } = req.query;
+        console.log("Search query:", query, "Page:", page, "Limit:", limit);
         
         try {
-            const filters = {};
-            if (status) filters.status = status;
-            if (priority) filters.priority = priority;
-            if (assigneeId) filters.assigneeId = assigneeId;
-            
-            const result = await taskDAO.searchTasks(userId, query, filters, parseInt(page), parseInt(limit));
+            const result = await taskDAO.searchTasks(query, parseInt(page), parseInt(limit));
             res.status(200).json(result);
         } catch (e) {
             console.error("Search tasks error:", e);
@@ -141,20 +135,15 @@ export default class TaskController {
     }
 
     static async updateTaskStatus(req, res) {
-        const { projectId, sectionId, taskId } = req.params;
-        const { status } = req.body;
+        const { taskId } = req.params;
+        const { completed } = req.body;
         
-        if (!status) {
-            return res.status(400).json({ error: "Status is required" });
-        }
-
-        const validStatuses = ["todo", "inprogress", "review", "done"];
-        if (!validStatuses.includes(status)) {
-            return res.status(400).json({ error: "Invalid status" });
+        if (completed === undefined) {
+            return res.status(400).json({ error: "Completed status is required" });
         }
 
         try {
-            const updated = await taskDAO.updateTaskStatus(projectId, sectionId, taskId, status);
+            const updated = await taskDAO.updateTaskStatus(taskId, completed);
             
             if (!updated) {
                 return res.status(404).json({ error: "Task not found" });
@@ -168,7 +157,7 @@ export default class TaskController {
     }
 
     static async addLabelToTask(req, res) {
-        const { projectId, sectionId, taskId } = req.params;
+        const { taskId } = req.params;
         const { labelId } = req.body;
         
         if (!labelId) {
@@ -176,7 +165,7 @@ export default class TaskController {
         }
 
         try {
-            const updated = await taskDAO.addLabelToTask(projectId, sectionId, taskId, labelId);
+            const updated = await taskDAO.addLabelToTask(taskId, labelId);
             
             if (!updated) {
                 return res.status(404).json({ error: "Task or label not found" });
@@ -190,7 +179,7 @@ export default class TaskController {
     }
 
     static async removeLabelFromTask(req, res) {
-        const { projectId, sectionId, taskId } = req.params;
+        const { taskId } = req.params;
         const { labelId } = req.body;
         
         if (!labelId) {
@@ -198,7 +187,7 @@ export default class TaskController {
         }
 
         try {
-            const updated = await taskDAO.removeLabelFromTask(projectId, sectionId, taskId, labelId);
+            const updated = await taskDAO.removeLabelFromTask(taskId, labelId);
             
             if (!updated) {
                 return res.status(404).json({ error: "Task or label not found" });

@@ -69,7 +69,9 @@ export default class projectDAO {
     
     static async getProjectById(projectId) {
         try {
-            const project = await projects.findOne({ _id: projectId })
+            const id = new ObjectId(projectId);
+            const project = await projects.findOne({ _id: id });
+            console.log("Fetched project:", project);
             return project
         } catch (e) {
             console.error(`Unable to get project: ${e}`)

@@ -1,37 +1,35 @@
 import mongodb from "mongodb"
 const ObjectId = mongodb.ObjectId
 
-let projects // Sử dụng collection projects thay vì labels
+let labels // Separate labels collection
 export default class labelDAO {
     static async injectDB(conn) {
-        if (projects) {
+        if (labels) {
             return
         }
         try {
-            projects = await conn.db(process.env.MOVIEREVIEWS_DB_NAME).collection("projects")
+            labels = await conn.db(process.env.MOVIEREVIEWS_DB_NAME).collection("labels")
+            // Create indexes for better performance
+            await labels.createIndex({ projectId: 1 })
+            await labels.createIndex({ userId: 1 })
+            await labels.createIndex({ name: "text" })
         } catch (e) {
             console.error(`Unable to establish a collection handle in labelDAO: ${e}`)
         }
     }
 
-    static async addLabel(projectId, name, color = "#3498db") {
+    static async addLabel(userId, name) {
         try {
             const labelDoc = {
-                _id: new ObjectId(), // Tạo ID mới cho label
+                _id: new ObjectId(),
+                userId: new ObjectId(userId),
                 name: name,
-                color: color,
-                createdAt: new Date()
+                createdAt: new Date(),
+                updatedAt: new Date()
             }
             
-            const result = await projects.updateOne(
-                { _id: projectId },
-                { 
-                    $push: { labels: labelDoc },
-                    $set: { updatedAt: new Date() }
-                }
-            )
-            
-            return result.modifiedCount > 0 ? labelDoc._id : null
+            const result = await labels.insertOne(labelDoc)
+            return result.insertedId
         } catch (e) {
             console.error(`Unable to add label: ${e}`)
             throw e
@@ -40,30 +38,26 @@ export default class labelDAO {
 
     static async getLabels(projectId) {
         try {
-            const project = await projects.findOne(
-                { _id: projectId },
-                { projection: { labels: 1 } }
-            )
+            const cursor = await labels.find(
+                { projectId: new ObjectId(projectId) }
+            ).sort({ createdAt: 1 })
             
-            return project ? project.labels || [] : []
+            return await cursor.toArray()
         } catch (e) {
             console.error(`Unable to get labels: ${e}`)
             throw e
         }
     }
 
-    static async updateLabel(projectId, labelId, name, color) {
+    static async updateLabel(labelId, name, color) {
         try {
             const updateFields = { updatedAt: new Date() };
             
-            if (name) updateFields["labels.$.name"] = name;
-            if (color) updateFields["labels.$.color"] = color;
+            if (name) updateFields.name = name;
+            if (color) updateFields.color = color;
             
-            const result = await projects.updateOne(
-                { 
-                    _id: projectId,
-                    "labels._id": labelId
-                },
+            const result = await labels.updateOne(
+                { _id: new ObjectId(labelId) },
                 { $set: updateFields }
             )
             
@@ -74,34 +68,24 @@ export default class labelDAO {
         }
     }
 
-    static async deleteLabel(projectId, labelId) {
+    static async deleteLabel(labelId) {
         try {
-            const result = await projects.updateOne(
-                { _id: projectId },
-                { 
-                    $pull: { labels: { _id: labelId } },
-                    $set: { updatedAt: new Date() }
-                }
+            const result = await labels.deleteOne(
+                { _id: new ObjectId(labelId) }
             )
             
-            return result.modifiedCount > 0
+            return result.deletedCount > 0
         } catch (e) {
             console.error(`Unable to delete label: ${e}`)
             throw e
         }
     }
 
-    static async getLabelById(projectId, labelId) {
+    static async getLabelById(labelId) {
         try {
-            const project = await projects.findOne(
-                { 
-                    _id: projectId,
-                    "labels._id": labelId
-                },
-                { projection: { "labels.$": 1 } }
+            return await labels.findOne(
+                { _id: new ObjectId(labelId) }
             )
-            
-            return project && project.labels ? project.labels[0] : null
         } catch (e) {
             console.error(`Unable to get label by ID: ${e}`)
             throw e
@@ -110,26 +94,11 @@ export default class labelDAO {
 
     static async getLabelsByUserId(userId) {
         try {
-            // Lấy tất cả projects của user, sau đó extract labels từ mỗi project
-            const userProjects = await projects.find(
-                { userId: userId },
-                { projection: { labels: 1 } }
-            ).toArray()
+            const cursor = await labels.find(
+                { userId: new ObjectId(userId) }
+            ).sort({ createdAt: 1 })
             
-            // Gom tất cả labels từ các projects lại
-            const allLabels = userProjects.reduce((acc, project) => {
-                if (project.labels && project.labels.length > 0) {
-                    // Thêm projectId vào mỗi label để biết label thuộc project nào
-                    const labelsWithProject = project.labels.map(label => ({
-                        ...label,
-                        projectId: project._id
-                    }));
-                    return acc.concat(labelsWithProject);
-                }
-                return acc;
-            }, []);
-            
-            return allLabels
+            return await cursor.toArray()
         } catch (e) {
             console.error(`Unable to get labels by user ID: ${e}`)
             throw e
@@ -140,50 +109,68 @@ export default class labelDAO {
         try {
             const skip = (page - 1) * limit;
             
-            // Tìm projects của user có labels phù hợp với query
-            const projectsWithMatchingLabels = await projects.find({
-                userId: userId,
-                "labels.name": { $regex: query, $options: 'i' }
-            }).toArray()
+            // Using text search (requires text index)
+            const cursor = labels.find({
+                userId: new ObjectId(userId),
+                $text: { $search: query }
+            })
+            .skip(skip)
+            .limit(limit)
+            .sort({ score: { $meta: "textScore" } })
             
-            // Extract và filter labels từ các projects
-            const matchingLabels = projectsWithMatchingLabels.reduce((acc, project) => {
-                if (project.labels && project.labels.length > 0) {
-                    const filteredLabels = project.labels.filter(label => 
-                        label.name.toLowerCase().includes(query.toLowerCase())
-                    ).map(label => ({
-                        ...label,
-                        projectId: project._id
-                    }));
-                    return acc.concat(filteredLabels);
-                }
-                return acc;
-            }, []);
+            const total = await labels.countDocuments({
+                userId: new ObjectId(userId),
+                $text: { $search: query }
+            })
             
-            // Phân trang
-            const paginatedLabels = matchingLabels.slice(skip, skip + limit);
+            const labelsList = await cursor.toArray()
             
             return {
-                labels: paginatedLabels,
-                total: matchingLabels.length,
+                labels: labelsList,
+                total: total,
                 page: page,
                 limit: limit,
-                pages: Math.ceil(matchingLabels.length / limit)
+                pages: Math.ceil(total / limit)
             }
         } catch (e) {
-            console.error(`Unable to search labels: ${e}`)
-            throw e
+            // Fallback to regex if text search fails
+            try {
+                const skip = (page - 1) * limit;
+                
+                const cursor = labels.find({
+                    userId: new ObjectId(userId),
+                    name: { $regex: query, $options: 'i' }
+                })
+                .skip(skip)
+                .limit(limit)
+                .sort({ name: 1 })
+                
+                const total = await labels.countDocuments({
+                    userId: new ObjectId(userId),
+                    name: { $regex: query, $options: 'i' }
+                })
+                
+                const labelsList = await cursor.toArray()
+                
+                return {
+                    labels: labelsList,
+                    total: total,
+                    page: page,
+                    limit: limit,
+                    pages: Math.ceil(total / limit)
+                }
+            } catch (fallbackError) {
+                console.error(`Unable to search labels: ${fallbackError}`)
+                throw fallbackError
+            }
         }
     }
 
     static async countLabels(projectId) {
         try {
-            const project = await projects.findOne(
-                { _id: projectId },
-                { projection: { labels: 1 } }
+            return await labels.countDocuments(
+                { projectId: new ObjectId(projectId) }
             )
-            
-            return project && project.labels ? project.labels.length : 0
         } catch (e) {
             console.error(`Unable to count labels: ${e}`)
             throw e
@@ -192,14 +179,46 @@ export default class labelDAO {
 
     static async getProjectsByLabelName(userId, labelName) {
         try {
-            const projectsList = await projects.find({
-                userId: userId,
-                "labels.name": { $regex: labelName, $options: 'i' }
+            // This would require joining with projects collection
+            // For now, return labels that match the name with their project IDs
+            const matchingLabels = await labels.find({
+                userId: new ObjectId(userId),
+                name: { $regex: labelName, $options: 'i' }
             }).toArray()
             
-            return projectsList
+            // Extract unique project IDs
+            const projectIds = [...new Set(matchingLabels.map(label => label.projectId.toString()))]
+            
+            return projectIds
         } catch (e) {
             console.error(`Unable to get projects by label name: ${e}`)
+            throw e
+        }
+    }
+
+    static async getLabelsByProjectIds(projectIds) {
+        try {
+            const objectIds = projectIds.map(id => new ObjectId(id))
+            const cursor = await labels.find(
+                { projectId: { $in: objectIds } }
+            ).sort({ createdAt: 1 })
+            
+            return await cursor.toArray()
+        } catch (e) {
+            console.error(`Unable to get labels by project IDs: ${e}`)
+            throw e
+        }
+    }
+
+    static async bulkDeleteLabelsByProject(projectId) {
+        try {
+            const result = await labels.deleteMany(
+                { projectId: new ObjectId(projectId) }
+            )
+            
+            return result.deletedCount
+        } catch (e) {
+            console.error(`Unable to bulk delete labels by project: ${e}`)
             throw e
         }
     }

@@ -18,6 +18,7 @@ export default class userDAO{
     static async register(email, password) {
         try {
             const user = await users.findOne({ email })
+            console.log("Registering user:", email)
             if (user) {
                 throw new Error("User already exists")
             }

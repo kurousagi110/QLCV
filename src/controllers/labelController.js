@@ -2,15 +2,14 @@ import labelDAO from "../models/labelDAO.js";
 
 export default class LabelController {
     static async createLabel(req, res) {
-        const { projectId } = req.params;
-        const { name, color } = req.body;
-        
+        const { name } = req.body; 
+        const userId = req.user.id;       
         if (!name) {
             return res.status(400).json({ error: "Label name is required" });
         }
 
         try {
-            const labelId = await labelDAO.addLabel(projectId, name, color);
+            const labelId = await labelDAO.addLabel(userId, name);
             res.status(201).json({ 
                 message: "Label created successfully", 
                 labelId 
@@ -37,7 +36,7 @@ export default class LabelController {
     }
 
     static async updateLabel(req, res) {
-        const { projectId, labelId } = req.params;
+        const { labelId } = req.params;
         const { name, color } = req.body;
         
         if (!name && !color) {
@@ -45,7 +44,7 @@ export default class LabelController {
         }
 
         try {
-            const updated = await labelDAO.updateLabel(projectId, labelId, name, color);
+            const updated = await labelDAO.updateLabel(labelId, name, color);
             
             if (!updated) {
                 return res.status(404).json({ error: "Label not found or no changes made" });
@@ -59,10 +58,10 @@ export default class LabelController {
     }
 
     static async deleteLabel(req, res) {
-        const { projectId, labelId } = req.params;
+        const { labelId } = req.params;
         
         try {
-            const deleted = await labelDAO.deleteLabel(projectId, labelId);
+            const deleted = await labelDAO.deleteLabel(labelId);
             
             if (!deleted) {
                 return res.status(404).json({ error: "Label not found" });
@@ -76,10 +75,10 @@ export default class LabelController {
     }
 
     static async getLabelById(req, res) {
-        const { projectId, labelId } = req.params;
+        const { labelId } = req.params;
         
         try {
-            const label = await labelDAO.getLabelById(projectId, labelId);
+            const label = await labelDAO.getLabelById(labelId);
             
             if (!label) {
                 return res.status(404).json({ error: "Label not found" });
@@ -120,6 +119,26 @@ export default class LabelController {
             res.status(200).json(result);
         } catch (e) {
             console.error("Search labels error:", e);
+            res.status(500).json({ error: e.message });
+        }
+    }
+
+    // New method to get labels by multiple project IDs
+    static async getLabelsByProjectIds(req, res) {
+        const { projectIds } = req.body;
+        
+        if (!projectIds || !Array.isArray(projectIds) || projectIds.length === 0) {
+            return res.status(400).json({ error: "Project IDs array is required" });
+        }
+
+        try {
+            const labels = await labelDAO.getLabelsByProjectIds(projectIds);
+            res.status(200).json({
+                count: labels.length,
+                labels
+            });
+        } catch (e) {
+            console.error("Get labels by project IDs error:", e);
             res.status(500).json({ error: e.message });
         }
     }

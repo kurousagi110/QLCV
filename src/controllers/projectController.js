@@ -47,6 +47,7 @@ export default class ProjectController {
     static async getProjectById(req, res) {
         try {
             const { id } = req.params;
+            console.log("Fetching project with ID:", id);
             const project = await projectDAO.getProjectById(id);
             
             if (!project) {

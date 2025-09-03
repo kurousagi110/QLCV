@@ -1,92 +1,100 @@
 import mongodb from "mongodb"
 const ObjectId = mongodb.ObjectId
 
-let projects // Sử dụng collection projects
+let tasks // Separate tasks collection
 export default class taskDAO {
     static async injectDB(conn) {
-        if (projects) {
+        if (tasks) {
             return
         }
         try {
-            projects = await conn.db(process.env.MOVIEREVIEWS_DB_NAME).collection("projects")
+            tasks = await conn.db(process.env.MOVIEREVIEWS_DB_NAME).collection("tasks")
+            // Create indexes for better performance
+            await tasks.createIndex({ projectId: 1 })
+            await tasks.createIndex({ sectionId: 1 })
+            await tasks.createIndex({ assigneeId: 1 })
+            await tasks.createIndex({ title: "text" })
         } catch (e) {
             console.error(`Unable to establish a collection handle in taskDAO: ${e}`)
         }
     }
 
-    static async addTask(projectId, sectionId, name, description, assigneeId, dueDate, priority = "medium", labels = []) {
+    static async addTask(taskData) {
         try {
             const taskDoc = {
-                _id: new ObjectId(), // Tạo ID mới cho task
-                name: name,
-                description: description,
-                assigneeId: assigneeId ? assigneeId : null,
-                dueDate: dueDate ? new Date(dueDate) : null,
-                priority: priority,
-                labels: labels,
-                status: "todo",
+                _id: new ObjectId(),
+                title: taskData.title,
+                description: taskData.description || "",
+                startAt: taskData.startAt ? new Date(taskData.startAt) : null,
+                dueAt: taskData.dueAt ? new Date(taskData.dueAt) : null,
+                priority: taskData.priority || "medium",
+                labels: taskData.labels || [],
+                projectId: new ObjectId(taskData.projectId),
+                sectionId: taskData.sectionId ? new ObjectId(taskData.sectionId) : null,
+                completed: false,
                 createdAt: new Date(),
-                updatedAt: new Date()
+                updatedAt: new Date(),
+                userId: new ObjectId(taskData.userId)
             }
             
-            // Tìm section trong project và thêm task
-            const result = await projects.updateOne(
-                { 
-                    _id: projectId,
-                    "sections._id": sectionId
-                },
-                { 
-                    $push: { "sections.$.tasks": taskDoc },
-                    $set: { updatedAt: new Date() }
-                }
-            )
-            
-            return result.modifiedCount > 0 ? taskDoc._id : null
+            const result = await tasks.insertOne(taskDoc)
+            return result.insertedId
         } catch (e) {
             console.error(`Unable to add task: ${e}`)
             throw e
         }
     }
 
-    static async getTasks(projectId, sectionId) {
+    static async getTasksByProject(projectId) {
         try {
-            const project = await projects.findOne(
-                { 
-                    _id: projectId,
-                    "sections._id": sectionId
-                },
-                { projection: { "sections.$": 1 } }
-            )
+            const cursor = await tasks.find(
+                { projectId: new ObjectId(projectId) }
+            ).sort({ createdAt: 1 })
             
-            return project && project.sections && project.sections[0].tasks 
-                ? project.sections[0].tasks 
-                : []
+            const tasksList = await cursor.toArray()
+            
+            // Format response to match API spec: id, title, completed
+            return tasksList.map(task => ({
+                id: task._id,
+                title: task.title,
+                completed: task.completed
+            }))
         } catch (e) {
-            console.error(`Unable to get tasks: ${e}`)
+            console.error(`Unable to get tasks by project: ${e}`)
             throw e
         }
     }
 
-    static async updateTask(projectId, sectionId, taskId, updateData) {
+    static async getTasksBySection(projectId, sectionId) {
+        try {
+            const cursor = await tasks.find({
+                projectId: new ObjectId(projectId),
+                sectionId: new ObjectId(sectionId)
+            }).sort({ createdAt: 1 })
+            
+            return await cursor.toArray()
+        } catch (e) {
+            console.error(`Unable to get tasks by section: ${e}`)
+            throw e
+        }
+    }
+
+    static async updateTask(taskId, updateData) {
         try {
             const updateFields = { updatedAt: new Date() };
             
-            // Tạo dynamic update fields
-            Object.keys(updateData).forEach(key => {
-                if (updateData[key] !== undefined) {
-                    updateFields[`sections.$[section].tasks.$[task].${key}`] = updateData[key];
-                }
-            });
+            // Add only the fields that are provided
+            if (updateData.title !== undefined) updateFields.title = updateData.title;
+            if (updateData.description !== undefined) updateFields.description = updateData.description;
+            if (updateData.startAt !== undefined) updateFields.startAt = updateData.startAt ? new Date(updateData.startAt) : null;
+            if (updateData.dueAt !== undefined) updateFields.dueAt = updateData.dueAt ? new Date(updateData.dueAt) : null;
+            if (updateData.priority !== undefined) updateFields.priority = updateData.priority;
+            if (updateData.labels !== undefined) updateFields.labels = updateData.labels;
+            if (updateData.completed !== undefined) updateFields.completed = updateData.completed;
             
-            const result = await projects.updateOne(
-                { _id: projectId },
-                { $set: updateFields },
-                {
-                    arrayFilters: [
-                        { "section._id": sectionId },
-                        { "task._id": taskId }
-                    ]
-                }
+            const result = await tasks.updateOne(
+                { _id: new ObjectId(taskId) },
+                { $set: updateFields }
             )
             
             return result.modifiedCount > 0
@@ -96,55 +104,24 @@ export default class taskDAO {
         }
     }
 
-    static async deleteTask(projectId, sectionId, taskId) {
+    static async deleteTask(taskId) {
         try {
-            const result = await projects.updateOne(
-                { _id: projectId },
-                { 
-                    $pull: { 
-                        "sections.$[section].tasks": { _id: taskId } 
-                    },
-                    $set: { updatedAt: new Date() }
-                },
-                {
-                    arrayFilters: [
-                        { "section._id": sectionId }
-                    ]
-                }
+            const result = await tasks.deleteOne(
+                { _id: new ObjectId(taskId) }
             )
             
-            return result.modifiedCount > 0
+            return result.deletedCount > 0
         } catch (e) {
             console.error(`Unable to delete task: ${e}`)
             throw e
         }
     }
 
-    static async getTaskById(projectId, sectionId, taskId) {
+    static async getTaskById(taskId) {
         try {
-            const project = await projects.findOne(
-                { 
-                    _id: projectId,
-                    "sections._id": sectionId,
-                    "sections.tasks._id": taskId
-                },
-                { 
-                    projection: { 
-                        "sections": { 
-                            "$elemMatch": { "_id": sectionId } 
-                        } 
-                    } 
-                }
+            return await tasks.findOne(
+                { _id: new ObjectId(taskId) }
             )
-            
-            if (!project || !project.sections || project.sections.length === 0) {
-                return null;
-            }
-            
-            const section = project.sections[0];
-            const task = section.tasks.find(t => t._id.toString() === taskId);
-            
-            return task || null;
         } catch (e) {
             console.error(`Unable to get task by ID: ${e}`)
             throw e
@@ -153,154 +130,83 @@ export default class taskDAO {
 
     static async getTasksByUserId(userId) {
         try {
-            // Tìm tất cả tasks mà user được assign
-            const userProjects = await projects.find({
-                "sections.tasks.assigneeId": userId
-            }).toArray()
+            const cursor = await tasks.find(
+                { userId: new ObjectId(userId) }
+            ).sort({ createdAt: 1 })
             
-            // Gom tất cả tasks của user
-            const userTasks = userProjects.reduce((acc, project) => {
-                project.sections.forEach(section => {
-                    if (section.tasks && section.tasks.length > 0) {
-                        const userTasksInSection = section.tasks.filter(task => 
-                            task.assigneeId && task.assigneeId.toString() === userId
-                        ).map(task => ({
-                            ...task,
-                            projectId: project._id,
-                            projectName: project.name,
-                            sectionId: section._id,
-                            sectionName: section.name
-                        }));
-                        acc = acc.concat(userTasksInSection);
-                    }
-                });
-                return acc;
-            }, []);
-            
-            return userTasks
+            return await cursor.toArray()
         } catch (e) {
             console.error(`Unable to get tasks by user ID: ${e}`)
             throw e
         }
     }
 
-    static async getTasksByProjectId(projectId) {
-        try {
-            const project = await projects.findOne(
-                { _id: projectId },
-                { projection: { sections: 1, name: 1 } }
-            )
-            
-            if (!project) {
-                return [];
-            }
-            
-            // Gom tất cả tasks từ tất cả sections
-            const allTasks = project.sections.reduce((acc, section) => {
-                if (section.tasks && section.tasks.length > 0) {
-                    const tasksWithSection = section.tasks.map(task => ({
-                        ...task,
-                        sectionId: section._id,
-                        sectionName: section.name,
-                        projectId: project._id,
-                        projectName: project.name
-                    }));
-                    return acc.concat(tasksWithSection);
-                }
-                return acc;
-            }, []);
-            
-            return allTasks
-        } catch (e) {
-            console.error(`Unable to get tasks by project ID: ${e}`)
-            throw e
-        }
-    }
-
-    static async searchTasks(userId, query, filters = {}, page = 1, limit = 10) {
+    static async searchTasks(query, page = 1, limit = 10) {
         try {
             const skip = (page - 1) * limit;
             
-            // Build filter query
-            let filterQuery = {
-                "sections.tasks.name": { $regex: query, $options: 'i' }
-            };
+            // Using text search (requires text index)
+            const cursor = tasks.find({
+                $text: { $search: query }
+            })
+            .skip(skip)
+            .limit(limit)
+            .sort({ score: { $meta: "textScore" } })
             
-            // Thêm filters nếu có
-            if (filters.status) {
-                filterQuery["sections.tasks.status"] = filters.status;
-            }
-            if (filters.priority) {
-                filterQuery["sections.tasks.priority"] = filters.priority;
-            }
-            if (filters.assigneeId) {
-                filterQuery["sections.tasks.assigneeId"] = filters.assigneeId;
-            }
+            const total = await tasks.countDocuments({
+                $text: { $search: query }
+            })
             
-            // Nếu không phải admin, chỉ tìm tasks của user
-            if (userId) {
-                filterQuery["$or"] = [
-                    { userId: userId }, // Projects của user
-                    { "sections.tasks.assigneeId": userId } // Tasks assigned to user
-                ];
-            }
-            
-            const projectsWithTasks = await projects.find(filterQuery).toArray();
-            
-            // Extract và filter tasks
-            const matchingTasks = projectsWithTasks.reduce((acc, project) => {
-                project.sections.forEach(section => {
-                    if (section.tasks && section.tasks.length > 0) {
-                        const filteredTasks = section.tasks.filter(task => 
-                            task.name.toLowerCase().includes(query.toLowerCase()) &&
-                            (!filters.status || task.status === filters.status) &&
-                            (!filters.priority || task.priority === filters.priority) &&
-                            (!filters.assigneeId || (task.assigneeId && task.assigneeId.toString() === filters.assigneeId))
-                        ).map(task => ({
-                            ...task,
-                            sectionId: section._id,
-                            sectionName: section.name,
-                            projectId: project._id,
-                            projectName: project.name
-                        }));
-                        acc = acc.concat(filteredTasks);
-                    }
-                });
-                return acc;
-            }, []);
-            
-            // Phân trang
-            const paginatedTasks = matchingTasks.slice(skip, skip + limit);
+            const tasksList = await cursor.toArray()
             
             return {
-                tasks: paginatedTasks,
-                total: matchingTasks.length,
+                tasks: tasksList,
+                total: total,
                 page: page,
                 limit: limit,
-                pages: Math.ceil(matchingTasks.length / limit)
+                pages: Math.ceil(total / limit)
             }
         } catch (e) {
-            console.error(`Unable to search tasks: ${e}`)
-            throw e
+            // Fallback to regex if text search fails
+            try {
+                const skip = (page - 1) * limit;
+                
+                const cursor = tasks.find({
+                    title: { $regex: query, $options: 'i' }
+                })
+                .skip(skip)
+                .limit(limit)
+                .sort({ title: 1 })
+                
+                const total = await tasks.countDocuments({
+                    title: { $regex: query, $options: 'i' }
+                })
+                
+                const tasksList = await cursor.toArray()
+                
+                return {
+                    tasks: tasksList,
+                    total: total,
+                    page: page,
+                    limit: limit,
+                    pages: Math.ceil(total / limit)
+                }
+            } catch (fallbackError) {
+                console.error(`Unable to search tasks: ${fallbackError}`)
+                throw fallbackError
+            }
         }
     }
 
-    static async updateTaskStatus(projectId, sectionId, taskId, status) {
+    static async updateTaskStatus(taskId, completed) {
         try {
-            const result = await projects.updateOne(
-                { _id: projectId },
+            const result = await tasks.updateOne(
+                { _id: new ObjectId(taskId) },
                 { 
                     $set: { 
-                        "sections.$[section].tasks.$[task].status": status,
-                        "sections.$[section].tasks.$[task].updatedAt": new Date(),
+                        completed: completed,
                         updatedAt: new Date()
                     } 
-                },
-                {
-                    arrayFilters: [
-                        { "section._id": sectionId },
-                        { "task._id": taskId }
-                    ]
                 }
             )
             
@@ -311,24 +217,13 @@ export default class taskDAO {
         }
     }
 
-    static async addLabelToTask(projectId, sectionId, taskId, labelId) {
+    static async addLabelToTask(taskId, labelId) {
         try {
-            const result = await projects.updateOne(
-                { _id: projectId },
+            const result = await tasks.updateOne(
+                { _id: new ObjectId(taskId) },
                 { 
-                    $addToSet: { 
-                        "sections.$[section].tasks.$[task].labels": labelId 
-                    },
-                    $set: { 
-                        "sections.$[section].tasks.$[task].updatedAt": new Date(),
-                        updatedAt: new Date()
-                    } 
-                },
-                {
-                    arrayFilters: [
-                        { "section._id": sectionId },
-                        { "task._id": taskId }
-                    ]
+                    $addToSet: { labels: new ObjectId(labelId) },
+                    $set: { updatedAt: new Date() }
                 }
             )
             
@@ -339,30 +234,73 @@ export default class taskDAO {
         }
     }
 
-    static async removeLabelFromTask(projectId, sectionId, taskId, labelId) {
+    static async removeLabelFromTask(taskId, labelId) {
         try {
-            const result = await projects.updateOne(
-                { _id: projectId },
+            const result = await tasks.updateOne(
+                { _id: new ObjectId(taskId) },
                 { 
-                    $pull: { 
-                        "sections.$[section].tasks.$[task].labels": labelId 
-                    },
-                    $set: { 
-                        "sections.$[section].tasks.$[task].updatedAt": new Date(),
-                        updatedAt: new Date()
-                    } 
-                },
-                {
-                    arrayFilters: [
-                        { "section._id": sectionId },
-                        { "task._id": taskId }
-                    ]
+                    $pull: { labels: new ObjectId(labelId) },
+                    $set: { updatedAt: new Date() }
                 }
             )
             
             return result.modifiedCount > 0
         } catch (e) {
             console.error(`Unable to remove label from task: ${e}`)
+            throw e
+        }
+    }
+
+    static async getTasksWithLabels(labelIds) {
+        try {
+            const objectIds = labelIds.map(id => new ObjectId(id))
+            const cursor = await tasks.find(
+                { labels: { $in: objectIds } }
+            ).sort({ createdAt: 1 })
+            
+            return await cursor.toArray()
+        } catch (e) {
+            console.error(`Unable to get tasks with labels: ${e}`)
+            throw e
+        }
+    }
+
+    static async bulkUpdateTasksByProject(projectId, updateData) {
+        try {
+            const result = await tasks.updateMany(
+                { projectId: new ObjectId(projectId) },
+                { $set: updateData }
+            )
+            
+            return result.modifiedCount
+        } catch (e) {
+            console.error(`Unable to bulk update tasks by project: ${e}`)
+            throw e
+        }
+    }
+
+    static async bulkDeleteTasksByProject(projectId) {
+        try {
+            const result = await tasks.deleteMany(
+                { projectId: new ObjectId(projectId) }
+            )
+            
+            return result.deletedCount
+        } catch (e) {
+            console.error(`Unable to bulk delete tasks by project: ${e}`)
+            throw e
+        }
+    }
+
+    static async bulkDeleteTasksBySection(sectionId) {
+        try {
+            const result = await tasks.deleteMany(
+                { sectionId: new ObjectId(sectionId) }
+            )
+            
+            return result.deletedCount
+        } catch (e) {
+            console.error(`Unable to bulk delete tasks by section: ${e}`)
             throw e
         }
     }

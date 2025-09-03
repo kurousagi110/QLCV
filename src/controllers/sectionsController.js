@@ -3,13 +3,14 @@ import sectionDAO from "../models/sectionsDAO.js";
 export default class sectionsController {
     static async createSection(req, res) {
         const { name, description, projectId } = req.body;
-        
+
         // Validation
-        if (!name || !description || !projectId) {
-            return res.status(400).json({ error: "Name, description, and projectId are required" });
-        }
+        // if (!name || !description || !projectId) {
+        //     return res.status(400).json({ error: "Name, description, and projectId are required" });
+        // }
 
         try {
+            console.log("Adding section to project:", projectId);
             const sectionId = await sectionDAO.addSection(projectId, name, description);
             res.status(201).json({ 
                 message: "Section created successfully", 
