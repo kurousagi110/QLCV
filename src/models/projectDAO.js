@@ -79,7 +79,7 @@ export default class projectDAO {
     
     static async getProjectsByUserId(userId) {
         try {
-            const projectsList = await projects.find({ userId: new ObjectId(userId) }).toArray()
+            const projectsList = await projects.find({ userId: userId }).toArray()
             return projectsList
         } catch (e) {
             console.error(`Unable to get projects by user ID: ${e}`)
@@ -111,4 +111,5 @@ export default class projectDAO {
     }
 
 }
+
 
