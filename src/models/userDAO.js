@@ -15,8 +15,21 @@ export default class userDAO{
             console.error(`Unable to establish a collection handle in userDAO: ${e}`)
         }
     }
-    static async register(email, password) {
+    static async register(email, password, username) {
         try {
+            if(!email){
+                const user = await users.findOne({ username })
+                if (user) {
+                    throw new Error("Username already exists")
+                }
+                const hassedPassword = await bcrypt.hash(password, 10)
+                const addUser = {
+                    username,
+                    password: hassedPassword
+                }
+                const result = await users.insertOne(addUser)
+                return result.insertedId
+            }
             const user = await users.findOne({ email })
             console.log("Registering user:", email)
             if (user) {
@@ -36,6 +49,22 @@ export default class userDAO{
     }
     static async login(email, password) {
         try {
+            if(!email){
+                const user = await users.findOne({ username })
+                if (!user) {
+                    throw new Error("User not found")
+                }
+                const isValid = await bcrypt.compare(password, user.password)
+                if (!isValid) {
+                    throw new Error("Invalid password")
+                }
+                const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' })
+                // Optionally, you can remove the password field before returning the user object
+                delete user.password
+                // Return the user object with the token
+                const result = { user, token }
+                return result
+            }
             const user = await users.findOne({ email })
             if (!user) {
                 throw new Error("User not found")
