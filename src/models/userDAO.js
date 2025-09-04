@@ -47,7 +47,7 @@ export default class userDAO{
             throw e
         }
     }
-    static async login(email, password) {
+    static async login(email, password, username) {
         try {
             if(!email){
                 const user = await users.findOne({ username })
