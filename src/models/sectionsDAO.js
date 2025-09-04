@@ -1,16 +1,19 @@
 import mongodb from "mongodb"
 const ObjectId = mongodb.ObjectId
 
-let projects
+let sections
+let projects // We'll need access to projects collection for validation
+
 export default class sectionDAO {
     static async injectDB(conn) {
-        if (projects) {
+        if (sections && projects) {
             return
         }
         try {
+            sections = await conn.db(process.env.MOVIEREVIEWS_DB_NAME).collection("sections")
             projects = await conn.db(process.env.MOVIEREVIEWS_DB_NAME).collection("projects")
         } catch (e) {
-            console.error(`Unable to establish a collection handle in sectionDAO: ${e}`)
+            console.error(`Unable to establish collection handles in sectionDAO: ${e}`)
         }
     }
     
@@ -18,47 +21,37 @@ export default class sectionDAO {
         try {
             // First check if project exists
             const project = await projects.findOne({ _id: new ObjectId(projectId) })
-            console.log("Found project:", project); // Fixed the variable name here
-
+            
             if (!project) {
                 throw new Error("Project not found")
             }
             
             const sectionDoc = {
-                _id: new ObjectId(), // Generate a unique ID for the section
+                _id: new ObjectId(),
+                projectId: new ObjectId(projectId),
                 name: name,
                 description: description,
-                createdAt: new Date()
+                createdAt: new Date(),
+                updatedAt: new Date()
             }
 
-            // Use $push instead of $set to add to the sections array
-            const result = await projects.updateOne(
-                { _id: new ObjectId(projectId) },
-                { 
-                    $push: { sections: sectionDoc },
-                    $set: { updatedAt: new Date() }
-                }
-            )
+            const result = await sections.insertOne(sectionDoc)
 
-            return result.modifiedCount > 0 ? sectionDoc._id : null
+            return result.insertedId
         } catch (e) {
             console.error(`Unable to add section: ${e}`)
             throw e
         }
     }
     
-    // Other methods remain the same...
-    static async updateSection(projectId, sectionId, name, description) {
+    static async updateSection(sectionId, name, description) {
         try {
-            const result = await projects.updateOne(
-                { 
-                    _id: new ObjectId(projectId),
-                    "sections._id": new ObjectId(sectionId)
-                },
+            const result = await sections.updateOne(
+                { _id: new ObjectId(sectionId) },
                 { 
                     $set: { 
-                        "sections.$.name": name,
-                        "sections.$.description": description,
+                        name: name,
+                        description: description,
                         updatedAt: new Date()
                     } 
                 }
@@ -70,33 +63,20 @@ export default class sectionDAO {
         }
     }
     
-    static async deleteSection(projectId, sectionId) {
+    static async deleteSection(sectionId) {
         try {
-            const result = await projects.updateOne(
-                { _id: new ObjectId(projectId) },
-                { 
-                    $pull: { sections: { _id: new ObjectId(sectionId) } },
-                    $set: { updatedAt: new Date() }
-                }
-            )
-            return result.modifiedCount > 0
+            const result = await sections.deleteOne({ _id: new ObjectId(sectionId) })
+            return result.deletedCount > 0
         } catch (e) {
             console.error(`Unable to delete section: ${e}`)
             throw e
         }
     }
     
-    static async getSectionById(projectId, sectionId) {
+    static async getSectionById(sectionId) {
         try {
-            const project = await projects.findOne(
-                { 
-                    _id: new ObjectId(projectId),
-                    "sections._id": new ObjectId(sectionId)
-                },
-                { projection: { "sections.$": 1 } }
-            )
-            
-            return project && project.sections ? project.sections[0] : null
+            const section = await sections.findOne({ _id: new ObjectId(sectionId) })
+            return section
         } catch (e) {
             console.error(`Unable to get section: ${e}`)
             throw e
@@ -105,12 +85,11 @@ export default class sectionDAO {
     
     static async getSectionsByProjectId(projectId) {
         try {
-            const project = await projects.findOne(
-                { _id: new ObjectId(projectId) },
-                { projection: { sections: 1 } }
-            )
+            const sectionsList = await sections.find({ 
+                projectId: new ObjectId(projectId) 
+            }).toArray()
             
-            return project ? project.sections : []
+            return sectionsList
         } catch (e) {
             console.error(`Unable to get sections by project ID: ${e}`)
             throw e
@@ -119,24 +98,72 @@ export default class sectionDAO {
     
     static async getSections() {
         try {
-            const allProjects = await projects.find({}).toArray()
-            const allSections = []
-            
-            allProjects.forEach(project => {
-                if (project.sections && project.sections.length > 0) {
-                    project.sections.forEach(section => {
-                        allSections.push({
-                            ...section,
-                            projectName: project.name,
-                            projectId: project._id
-                        })
-                    })
+            // Use aggregation to join with projects collection
+            const allSections = await sections.aggregate([
+                {
+                    $lookup: {
+                        from: "projects",
+                        localField: "projectId",
+                        foreignField: "_id",
+                        as: "project"
+                    }
+                },
+                {
+                    $unwind: "$project"
+                },
+                {
+                    $project: {
+                        _id: 1,
+                        name: 1,
+                        description: 1,
+                        createdAt: 1,
+                        updatedAt: 1,
+                        projectId: 1,
+                        projectName: "$project.name"
+                    }
                 }
-            })
+            ]).toArray()
             
             return allSections
         } catch (e) {
             console.error(`Unable to get all sections: ${e}`)
+            throw e
+        }
+    }
+
+    // Additional method to get sections with full project details
+    static async getSectionsWithProjectDetails() {
+        try {
+            const sectionsWithProjects = await sections.aggregate([
+                {
+                    $lookup: {
+                        from: "projects",
+                        localField: "projectId",
+                        foreignField: "_id",
+                        as: "projectDetails"
+                    }
+                },
+                {
+                    $unwind: "$projectDetails"
+                }
+            ]).toArray()
+            
+            return sectionsWithProjects
+        } catch (e) {
+            console.error(`Unable to get sections with project details: ${e}`)
+            throw e
+        }
+    }
+
+    // Method to get sections count by project
+    static async getSectionCountByProject(projectId) {
+        try {
+            const count = await sections.countDocuments({ 
+                projectId: new ObjectId(projectId) 
+            })
+            return count
+        } catch (e) {
+            console.error(`Unable to get section count: ${e}`)
             throw e
         }
     }

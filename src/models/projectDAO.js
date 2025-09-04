@@ -20,7 +20,6 @@ export default class projectDAO {
                 name: name,
                 description: description,
                 userId: userId,
-                sections: [],
                 createdAt: new Date(),
                 updatedAt: new Date()
             }
