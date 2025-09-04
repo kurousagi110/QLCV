@@ -78,13 +78,7 @@ export default class sectionsController {
         }
 
         try {
-            // First get the section to know which project it belongs to
-            const section = await sectionDAO.getSectionById(id);
-            if (!section) {
-                return res.status(404).json({ error: "Section not found" });
-            }
-
-            const updated = await sectionDAO.updateSection(section.projectId, id, name, description);
+            const updated = await sectionDAO.updateSection( id, name, description);
             
             if (!updated) {
                 return res.status(404).json({ error: "Section not found or no changes made" });
